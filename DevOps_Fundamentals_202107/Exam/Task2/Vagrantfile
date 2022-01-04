@@ -1,0 +1,134 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+$common = <<SCRIPT
+echo "* Add hosts ..."
+echo "192.168.99.101 mnode.dof.exam mnode" >> /etc/hosts
+echo "192.168.99.102 wnode.dof.exam wnode" >> /etc/hosts
+
+echo "* Remove an extra row from /etc/hosts ..."
+sed -i '/127.0.1.1/d' /etc/hosts
+
+echo "* Change some system settings ..."
+cat << EOF | tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sysctl --system
+sysctl -w vm.max_map_count=262144
+
+echo "* Stop Firewall ..."
+systemctl stop firewalld
+systemctl disable firewalld
+
+echo "* Change SELinux state ..."
+setenforce 0
+sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+
+echo "* Install Prerequisites ..."
+dnf install -y bash-completion wget yum-utils
+
+echo "* Add Docker repository ..."
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+echo "* Add Kubernetes repository ..."
+cat << EOF | tee /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+echo "* Install Docker and Kubernetes ..."
+dnf install -y docker-ce kubelet kubeadm kubectl
+
+echo "Modify Docker configuration ..."
+mkdir -p /etc/docker
+cat << EOF | tee /etc/docker/daemon.json
+{
+  "exec-opts": ["native.cgroupdriver=systemd"]
+}
+EOF
+
+echo "* Start Docker ..."
+systemctl daemon-reload
+systemctl enable docker
+systemctl start docker
+
+echo "* Start Kubernetes ..."
+systemctl enable kubelet
+systemctl start kubelet
+
+echo "* Turn off the swap ..."
+swapoff -a
+sed -i '/ swap / s/^/#/' /etc/fstab
+
+echo "* Add vagrant user to docker group ..."
+usermod -aG docker vagrant
+
+echo "* Correct the default FORWARD policy ..."
+iptables -P FORWARD ACCEPT
+
+SCRIPT
+
+Vagrant.configure(2) do |config|
+    
+  config.ssh.insert_key = false
+  config.vm.box = "shekeriev/centos-8-minimal"
+
+  config.vm.define "mnode" do |mnode|
+    mnode.vm.provider "virtualbox" do |v|
+      v.memory = 2048
+      v.cpus = 2
+    end
+    mnode.vm.hostname = "mnode.dof.exam"
+    mnode.vm.network "private_network", ip: "192.168.99.101"
+    mnode.vm.synced_folder "vagrant/", "/vagrant"
+    mnode.vm.provision "shell", inline: $common
+    mnode.vm.provision "shell", inline: <<EOS
+
+echo "* Initialize Kubernetes cluster ..."
+kubeadm init --apiserver-advertise-address=192.168.99.101 --pod-network-cidr 10.244.0.0/16
+
+echo "* Copy configuration for root ..."
+mkdir -p /root/.kube
+cp -i /etc/kubernetes/admin.conf /root/.kube/config
+chown root:root /root/.kube/config
+
+echo "* Copy configuration for vagrant ..."
+mkdir -p /home/vagrant/.kube
+cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+chown vagrant:vagrant /home/vagrant/.kube/config
+
+echo "* Install the POD network plugin (a patched Flannel YAML file) ..."
+kubectl apply -f /vagrant/flannel/flannel.yaml
+
+echo "* Create custom token ..."
+kubeadm token create abcdef.1234567890abcdef
+
+echo "* Save the hash to a file ..."
+openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //' > /vagrant/hash.txt
+
+EOS
+  end
+
+  config.vm.define "wnode" do |wnode|
+    wnode.vm.provider "virtualbox" do |v|
+      v.memory = 6144
+      v.cpus = 2
+    end
+    wnode.vm.hostname = "wnode.dof.exam"
+    wnode.vm.network "private_network", ip: "192.168.99.102"
+    wnode.vm.synced_folder "vagrant/", "/vagrant"
+    wnode.vm.provision "shell", inline: $common
+    wnode.vm.provision "shell", inline: <<EOS
+
+echo "* Join the worker node (wnode) ..."
+kubeadm join 192.168.99.101:6443 --token abcdef.1234567890abcdef --discovery-token-ca-cert-hash sha256:`cat /vagrant/hash.txt`
+
+EOS
+  end
+end

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+data:
+  logstash.conf: |-
+    input {
+      beats {
+        port => 5000
+      }
+    }
+
+    filter {
+
+    }
+
+
+    output {
+      elasticsearch {
+        hosts => ["http://elasticsearch:9200"]
+        index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
+      }
+    }

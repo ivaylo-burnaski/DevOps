@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  name: elasticsearch
+spec:
+  replicas: 1
+  strategy: {}
+  selector:
+    matchLabels:
+      name: elasticsearch
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        name: elasticsearch
+    spec:
+      containers:
+      - env:
+        - name: ES_JAVA_OPTS
+          value: -Xmx512m -Xms512m
+        image: shekeriev/dof-elasticsearch:7.14.1
+        imagePullPolicy: Always
+        name: elasticsearch
+        ports:
+        - containerPort: 9200
+        resources: {}
+      restartPolicy: Always
+status: {}

@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  name: kibana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      name: kibana
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        name: kibana
+    spec:
+      containers:
+      - image: shekeriev/dof-kibana:7.14.1
+        imagePullPolicy: Always
+        name: kibana
+        ports:
+        - containerPort: 5601
+        resources: {}
+      restartPolicy: Always
+status: {}
