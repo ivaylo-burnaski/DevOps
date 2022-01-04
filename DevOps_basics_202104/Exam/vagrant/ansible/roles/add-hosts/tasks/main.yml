@@ -1,0 +1,17 @@
+---
+  - name: Add ansible host
+    lineinfile:
+      path: /etc/hosts
+      line: '192.168.120.100 avm.dob.exam ansible'
+  - name: Add jenkins host
+    lineinfile:
+      path: /etc/hosts
+      line: '192.168.120.101 jvm.dob.exam jenkins'
+  - name: Add nagios host
+    lineinfile:
+      path: /etc/hosts
+      line: '192.168.120.102 nvm.dob.exam nagios'
+  - name: Add docker host
+    lineinfile:
+      path: /etc/hosts
+      line: '192.168.120.103 dvm.dob.exam docker'
